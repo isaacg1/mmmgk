@@ -1,7 +1,7 @@
 use rand::prelude::*;
 
 const STATES: usize = 3;
-const SERVERS: usize = 2;
+const SERVERS: usize = 3;
 
 fn sim(
     lambdas: [f64; STATES],
@@ -9,11 +9,12 @@ fn sim(
     alphass: [[f64; STATES]; STATES],
     num_jobs: u64,
     seed: u64,
-) -> f64 {
+) -> [f64; SERVERS] {
     assert!(STATES >= 1);
     assert!(SERVERS >= 1);
     let mut rng = StdRng::seed_from_u64(seed);
-    let mut total_gap = 0.0;
+    //let mut total_gap = 0.0;
+    let mut total_vec = [0; SERVERS];
     let mut num_arrivals = 0;
     let mut queues = [0; SERVERS];
     let mut state = 0;
@@ -28,10 +29,12 @@ fn sim(
         if sample < lambda {
             // arrival
             // data
-            let total_queue: u64 = queues.iter().sum();
-            let mean_queue = total_queue as f64 / SERVERS as f64;
-            let gap: f64 = queues.iter().map(|&q| (q as f64 - mean_queue).abs()).sum();
-            total_gap += gap;
+            // let total_queue: u64 = queues.iter().sum();
+            // total += total_queue;
+            total_vec = total_vec.iter().zip(&queues).map(|(v, q)| v + q).collect::<Vec<u64>>().try_into().expect("Correct length");
+            //let mean_queue = total_queue as f64 / SERVERS as f64;
+            //let gap: f64 = queues.iter().map(|&q| (q as f64 - mean_queue).abs()).sum();
+            //total_gap += gap;
             num_arrivals += 1;
             // JSQ
             let (min_index, _) = queues
@@ -64,26 +67,41 @@ fn sim(
             }
         }
     }
-    total_gap / num_arrivals as f64
+    total_vec.map(|v| v as f64 / num_arrivals as f64)
 }
 
 fn main() {
+    let num_jobs = 10_000_000;
+    let seed = 0;
+    /*
     let lambda = 7.5;
     let lambdas = [lambda; STATES];
-    let num_jobs = 100_000_000;
-    let seed = 0;
     let musss = [[[10.0, 1.0], [1.0, 10.0], [1.0, 1.0]], [[7.0, 4.0], [4.0, 7.0], [1.0, 1.0]]];
+    */
+    let lambdas_norm = [3.0, 6.0, 9.0];
+    let musss = [
+        [
+            [0.5, 0.5, 1.0],
+            [1.0, 2.5, 2.0],
+            [5.0, 3.0, 2.5],
+        ],
+    ];
     println!(
-        "lambdas {lambdas:?} musss {musss:?} num_jobs {num_jobs} seed {seed}"
+        "lambdas_norm {lambdas_norm:?} musss {musss:?} num_jobs {num_jobs} seed {seed}"
     );
-    println!("alpha; E[gap] high; E[gap] low");
+    let alpha = 0.1;
+    let alphass = [[0.0, alpha, 0.0], [0.0, 0.0, alpha], [alpha, 0.0, 0.0]];
+    for lambda_mult in [0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.83, 0.86, 0.9, 0.92, 0.94, 0.96, 0.97, 0.98, 0.99] {
+    //println!("alpha; E[gap] high; E[gap] low");
     // Need variable mu_sum to really demonstrate
-    for alpha in [1.0, 0.5, 0.2, 0.1, 0.05, 0.02, 0.01, 0.005, 0.002, 0.001] {
-        print!("{alpha};");
+    //for alpha in [1.0, 0.5, 0.2, 0.1, 0.05, 0.02, 0.01, 0.005, 0.002, 0.001] {
+        print!("{lambda_mult};");
+        let lambdas = lambdas_norm.map(|ln| ln * lambda_mult);
         for muss in musss {
-            let alphass = [[0.0, alpha, 0.0], [0.0, 0.0, alpha], [alpha, 0.0, 0.0]];
-            let mean_gap = sim(lambdas, muss, alphass, num_jobs, seed);
-            print!("{mean_gap};");
+            let mean_vec = sim(lambdas, muss, alphass, num_jobs, seed);
+            for v in mean_vec {
+                print!("{v};");
+            }
         }
         println!();
     }
