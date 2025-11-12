@@ -1,11 +1,13 @@
 use rand::prelude::*;
 use std::array;
+use noisy_float::prelude::*;
 
 const STATES: usize = 3;
 const SERVERS: usize = 3;
 
 struct Results {
     means: [f64; SERVERS],
+    gaps: [f64; SERVERS],
     hists: [Vec<u64>; SERVERS],
 }
 
@@ -19,12 +21,12 @@ fn sim(
     assert!(STATES >= 1);
     assert!(SERVERS >= 1);
     let mut rng = StdRng::seed_from_u64(seed);
-    //let mut total_gap = 0.0;
-    let mut total_vec = [0; SERVERS];
+    let mut total_queue = [0; SERVERS];
+    let mut total_gap = [0.0; SERVERS];
     let mut num_arrivals = 0;
     let mut queues = [0; SERVERS];
     let mut state = 0;
-    let mut counts = array::from_fn(|_|vec![]);
+    let mut counts = array::from_fn(|_| vec![]);
     while num_arrivals < num_jobs {
         let lambda = lambdas[state];
         let mus = muss[state];
@@ -38,11 +40,19 @@ fn sim(
             // data
             // let total_queue: u64 = queues.iter().sum();
             // total += total_queue;
-            total_vec = total_vec
+            total_queue = total_queue
                 .iter()
                 .zip(&queues)
                 .map(|(v, q)| v + q)
                 .collect::<Vec<u64>>()
+                .try_into()
+                .expect("Correct length");
+            let sum: u64 = queues.iter().sum();
+            total_gap = total_gap
+                .iter()
+                .zip(&queues)
+                .map(|(g, q)| g + (*q as f64 - sum as f64/SERVERS as f64).abs())
+                .collect::<Vec<f64>>()
                 .try_into()
                 .expect("Correct length");
             for (i, q) in queues.iter().enumerate() {
@@ -87,8 +97,13 @@ fn sim(
             }
         }
     }
-    let means = total_vec.map(|v| v as f64 / num_arrivals as f64);
-    Results { means, hists: counts }
+    let means = total_queue.map(|v| v as f64 / num_arrivals as f64);
+    let gaps = total_gap.map(|f| f / num_arrivals as f64);
+    Results {
+        means,
+        gaps,
+        hists: counts,
+    }
 }
 
 fn mean_by_load() {
@@ -103,7 +118,9 @@ fn mean_by_load() {
         let musss = [[[0.5, 0.5, 1.0], [1.0, 2.5, 2.0], [5.0, 3.0, 2.5]]];
         let alpha = 0.1;
         let alphass = [[0.0, alpha, 0.0], [0.0, 0.0, alpha], [alpha, 0.0, 0.0]];
-        println!("lambdas_norm {lambdas_norm:?} musss {musss:?} alphass {alphass:?} num_jobs {num_jobs} seed {seed}");
+        println!(
+            "lambdas_norm {lambdas_norm:?} musss {musss:?} alphass {alphass:?} num_jobs {num_jobs} seed {seed}"
+        );
         for lambda_mult in [
             0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.83, 0.86, 0.9, 0.92, 0.94, 0.96, 0.97, 0.98, 0.99,
         ] {
@@ -124,34 +141,67 @@ fn mean_by_load() {
 }
 
 fn dist_by_load() {
-    let num_jobs = 10_000_000;
+    let num_jobs = 100_000_000;
     let seed = 0;
-        let lambdas_norm = [3.0, 6.0, 9.0];
-        let musss = [[[0.5, 0.5, 1.0], [1.0, 2.5, 2.0], [5.0, 3.0, 2.5]]];
-        let alpha = 0.1;
-        let alphass = [[0.0, alpha, 0.0], [0.0, 0.0, alpha], [alpha, 0.0, 0.0]];
-        println!("lambdas_norm {lambdas_norm:?} musss {musss:?} alphass {alphass:?} num_jobs {num_jobs} seed {seed}");
-        for lambda_mult in [0.8, 0.9, 0.95, 0.98, 0.99] {
-            println!("{lambda_mult};");
-            let lambdas = lambdas_norm.map(|ln| ln * lambda_mult);
-            for muss in musss {
-                let hists = sim(lambdas, muss, alphass, num_jobs, seed).hists;
-                for (i, hist) in hists.iter().enumerate() {
-                    print!("{i};");
-                    for entry in hist {
-                        print!("{entry};");
-                    }
-                    println!();
+    let lambdas_norm = [3.0, 6.0, 9.0];
+    let musss = [[[0.5, 0.5, 1.0], [1.0, 2.5, 2.0], [5.0, 3.0, 2.5]]];
+    let alpha = 0.1;
+    let alphass = [[0.0, alpha, 0.0], [0.0, 0.0, alpha], [alpha, 0.0, 0.0]];
+    println!(
+        "lambdas_norm {lambdas_norm:?} musss {musss:?} alphass {alphass:?} num_jobs {num_jobs} seed {seed}"
+    );
+    for lambda_mult in [0.8, 0.9, 0.95, 0.98, 0.99] {
+        println!("{lambda_mult};");
+        let lambdas = lambdas_norm.map(|ln| ln * lambda_mult);
+        for muss in musss {
+            let hists = sim(lambdas, muss, alphass, num_jobs, seed).hists;
+            for (i, hist) in hists.iter().enumerate() {
+                print!("{i};");
+                for entry in hist {
+                    print!("{entry};");
                 }
+                println!();
             }
         }
+    }
+}
+
+fn ssc_and_mean_by_alpha() {
+    let num_jobs = 100_000_000;
+    let seed = 0;
+    let lambdas_norm = [3.0, 6.0, 9.0];
+    let lambda_mult = 0.95;
+    let lambdas = lambdas_norm.map(|ln| ln * lambda_mult);
+    let musss = [[[0.5, 0.5, 1.0], [1.0, 2.5, 2.0], [5.0, 3.0, 2.5]], [[8.0, 1.0, 1.5], [0.5, 1.0, 0.5], [1.5, 1.5, 2.5]]];
+    let mut alphas = vec![1.0, 0.5, 0.2, 0.1, 0.05, 0.02, 0.01, 0.005, 0.002, 0.001];
+    alphas.sort_by_key(|f| n64(-f));
+    println!(
+        "lambdas_norm {lambdas_norm:?} lambda_mult {lambda_mult} musss {musss:?} alphas {alphas:?} num_jobs {num_jobs} seed {seed}"
+    );
+    for muss in musss {
+        println!("muss {muss:?}");
+        println!("alpha;mean;mean;mean;gap;gap;gap");
+        for &alpha in &alphas {
+            let alphass = [[0.0, alpha, 0.0], [0.0, 0.0, alpha], [alpha, 0.0, 0.0]];
+            print!("{alpha};");
+            let result = sim(lambdas, muss, alphass, num_jobs, seed);
+            for mean in result.means {
+                print!("{mean};");
+            }
+            for gap in result.gaps {
+                print!("{gap};");
+            }
+            println!()
+        }
+    }
 }
 
 fn main() {
-    let setting = 1;
+    let setting: u64 = std::env::args().nth(1).expect("arg present").parse().expect("arg num");
     match setting {
         0 => mean_by_load(),
         1 => dist_by_load(),
+        2 => ssc_and_mean_by_alpha(),
         _ => unimplemented!(),
     }
 }
