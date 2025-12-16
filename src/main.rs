@@ -1,6 +1,6 @@
+use noisy_float::prelude::*;
 use rand::prelude::*;
 use std::array;
-use noisy_float::prelude::*;
 
 const STATES: usize = 3;
 const SERVERS: usize = 3;
@@ -24,9 +24,11 @@ fn sim(
     let mut total_queue = [0; SERVERS];
     let mut total_gap = [0.0; SERVERS];
     let mut num_arrivals = 0;
+    let mut num_samples = 0;
     let mut queues = [0; SERVERS];
     let mut state = 0;
     let mut counts = array::from_fn(|_| vec![]);
+    let min_rate = (0..STATES).map(|state| lambdas[state] + muss[state].iter().sum::<f64>() + alphass[state].iter().sum::<f64>()).min_by_key(|&f| n64(f)).expect("Some states");
     while num_arrivals < num_jobs {
         let lambda = lambdas[state];
         let mus = muss[state];
@@ -35,7 +37,10 @@ fn sim(
         let alpha_sum: f64 = alphas.iter().sum();
         let rate = lambda + mu_sum + alpha_sum;
         let sample = rng.random_range(0.0..rate);
-        if sample < lambda {
+        assert!(min_rate <= rate + 1e-8);
+//        if sample < lambda {
+        if sample < min_rate {
+            num_samples += 1;
             // arrival
             // data
             // let total_queue: u64 = queues.iter().sum();
@@ -51,7 +56,7 @@ fn sim(
             total_gap = total_gap
                 .iter()
                 .zip(&queues)
-                .map(|(g, q)| g + (*q as f64 - sum as f64/SERVERS as f64).abs())
+                .map(|(g, q)| g + (*q as f64 - sum as f64 / SERVERS as f64).abs())
                 .collect::<Vec<f64>>()
                 .try_into()
                 .expect("Correct length");
@@ -65,6 +70,8 @@ fn sim(
             //let mean_queue = total_queue as f64 / SERVERS as f64;
             //let gap: f64 = queues.iter().map(|&q| (q as f64 - mean_queue).abs()).sum();
             //total_gap += gap;
+        }
+        if sample < lambda {
             num_arrivals += 1;
             // JSQ
             let (min_index, _) = queues
@@ -97,8 +104,8 @@ fn sim(
             }
         }
     }
-    let means = total_queue.map(|v| v as f64 / num_arrivals as f64);
-    let gaps = total_gap.map(|f| f / num_arrivals as f64);
+    let means = total_queue.map(|v| v as f64 / num_samples as f64);
+    let gaps = total_gap.map(|f| f / num_samples as f64);
     Results {
         means,
         gaps,
@@ -142,25 +149,27 @@ fn mean_by_load() {
 
 fn dist_by_load() {
     let num_jobs = 100_000_000;
-    let seed = 0;
     let lambdas_norm = [3.0, 6.0, 9.0];
     let musss = [[[0.5, 0.5, 1.0], [1.0, 2.5, 2.0], [5.0, 3.0, 2.5]]];
     let alpha = 0.1;
     let alphass = [[0.0, alpha, 0.0], [0.0, 0.0, alpha], [alpha, 0.0, 0.0]];
     println!(
-        "lambdas_norm {lambdas_norm:?} musss {musss:?} alphass {alphass:?} num_jobs {num_jobs} seed {seed}"
+        "lambdas_norm {lambdas_norm:?} musss {musss:?} alphass {alphass:?} num_jobs {num_jobs}"
     );
-    for lambda_mult in [0.8, 0.9, 0.95, 0.98, 0.99] {
-        println!("{lambda_mult};");
-        let lambdas = lambdas_norm.map(|ln| ln * lambda_mult);
-        for muss in musss {
-            let hists = sim(lambdas, muss, alphass, num_jobs, seed).hists;
-            for (i, hist) in hists.iter().enumerate() {
-                print!("{i};");
-                for entry in hist {
-                    print!("{entry};");
+    for seed in 0..10 {
+        println!("seed {seed}");
+        for lambda_mult in [0.98] {
+            println!("{lambda_mult};");
+            let lambdas = lambdas_norm.map(|ln| ln * lambda_mult);
+            for muss in musss {
+                let hists = sim(lambdas, muss, alphass, num_jobs, seed).hists;
+                for (i, hist) in hists.iter().enumerate() {
+                    print!("{i};");
+                    for entry in hist {
+                        print!("{entry};");
+                    }
+                    println!();
                 }
-                println!();
             }
         }
     }
@@ -168,36 +177,45 @@ fn dist_by_load() {
 
 fn ssc_and_mean_by_alpha() {
     let num_jobs = 100_000_000;
-    let seed = 0;
     let lambdas_norm = [3.0, 6.0, 9.0];
     let lambda_mult = 0.95;
     let lambdas = lambdas_norm.map(|ln| ln * lambda_mult);
-    let musss = [[[0.5, 0.5, 1.0], [1.0, 2.5, 2.0], [5.0, 3.0, 2.5]], [[8.0, 1.0, 1.5], [0.5, 1.0, 0.5], [1.5, 1.5, 2.5]]];
+    let musss = [
+        [[0.5, 0.5, 1.0], [1.0, 2.5, 2.0], [5.0, 3.0, 2.5]],
+        [[8.0, 1.0, 1.5], [0.5, 1.0, 0.5], [1.5, 1.5, 2.5]],
+    ];
     let mut alphas = vec![1.0, 0.5, 0.2, 0.1, 0.05, 0.02, 0.01, 0.005, 0.002, 0.001];
     alphas.sort_by_key(|f| n64(-f));
     println!(
-        "lambdas_norm {lambdas_norm:?} lambda_mult {lambda_mult} musss {musss:?} alphas {alphas:?} num_jobs {num_jobs} seed {seed}"
+        "lambdas_norm {lambdas_norm:?} lambda_mult {lambda_mult} musss {musss:?} alphas {alphas:?} num_jobs {num_jobs}"
     );
-    for muss in musss {
-        println!("muss {muss:?}");
-        println!("alpha;mean;mean;mean;gap;gap;gap");
-        for &alpha in &alphas {
-            let alphass = [[0.0, alpha, 0.0], [0.0, 0.0, alpha], [alpha, 0.0, 0.0]];
-            print!("{alpha};");
-            let result = sim(lambdas, muss, alphass, num_jobs, seed);
-            for mean in result.means {
-                print!("{mean};");
+    for seed in 0..10 {
+        println!("seed {seed}");
+        for muss in musss {
+            println!("muss {muss:?}");
+            println!("alpha;mean;mean;mean;gap;gap;gap");
+            for &alpha in &alphas {
+                let alphass = [[0.0, alpha, 0.0], [0.0, 0.0, alpha], [alpha, 0.0, 0.0]];
+                print!("{alpha};");
+                let result = sim(lambdas, muss, alphass, num_jobs, seed);
+                for mean in result.means {
+                    print!("{mean};");
+                }
+                for gap in result.gaps {
+                    print!("{gap};");
+                }
+                println!()
             }
-            for gap in result.gaps {
-                print!("{gap};");
-            }
-            println!()
         }
     }
 }
 
 fn main() {
-    let setting: u64 = std::env::args().nth(1).expect("arg present").parse().expect("arg num");
+    let setting: u64 = std::env::args()
+        .nth(1)
+        .expect("arg present")
+        .parse()
+        .expect("arg num");
     match setting {
         0 => mean_by_load(),
         1 => dist_by_load(),
